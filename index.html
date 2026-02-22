@@ -104,16 +104,35 @@
             width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden;
         }
 
-        /* This allows the container to be grabbed even if clicking the text */
-        .element[data-type="text"] [contenteditable="true"] {
-            cursor: text;
-            user-select: text;
-        }
+        /* The drag handle that appears on the text box */
+.text-drag-handle {
+    position: absolute;
+    top: -25px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 30px;
+    height: 20px;
+    background: #444;
+    border-radius: 4px 4px 0 0;
+    cursor: move;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 12px;
+    opacity: 0; /* Hidden until selected */
+    transition: opacity 0.2s;
+}
 
-/* Optional: shows a move cursor when hovering over the edges of the text box */
-        .element[data-type="text"] {
-            cursor: move;
-        }
+/* Only show the handle when the text box is selected */
+.element.selected .text-drag-handle {
+    opacity: 1;
+}
+
+/* Make sure the text itself doesn't eat the mouse events when dragging the box */
+.element[data-type="text"] [contenteditable="true"] {
+    cursor: text;
+}
 
         .btn { 
             background: var(--accent); color: white; border: none; padding: 10px 16px; 
@@ -612,28 +631,46 @@
         });
     }
 
-    function spawn(type, content, x=100, y=100) {
-        const id = 'obj_' + Date.now();
-        const el = document.createElement('div');
-        el.className = 'element'; el.id = id;
-        el.style.left = x + 'px'; el.style.top = y + 'px';
-        el.dataset.type = type; el.dataset.rot = 0; el.dataset.sx = 1;
-        if(type === 'img') {
-            el.style.width = "140px";
-            el.innerHTML = `<img src="${content}" style="width:100%; height:100%; border-radius:4px; pointer-events:none; display:block;">`;
-        } else if(type === 'text') {
-            el.style.width = "200px";
-            el.innerHTML = `<div contenteditable="true" style="font-family:'KG Red Hands'; font-size:24px; color:#000; width:100%; text-align:center; outline:none; padding: 10px; box-sizing: border-box; word-wrap: break-word;">TYPE HERE</div>`;
-        } else if(type === 'shape') {
-            el.style.width = "100px"; el.style.height = "100px"; el.style.backgroundColor = "#000";
-            if(content === 'circle') el.style.borderRadius = "50%";
-        }
-        el.innerHTML += `<div class="resizer"></div><div class="rot-handle"></div>`;
-        document.getElementById('objects-layer').appendChild(el);
-        attachElementLogic(el);
-        rebuildLayerList();
-        select(el);
+    function spawn(type, content, x = null, y = null) {
+    const id = 'obj_' + Date.now();
+    const el = document.createElement('div');
+    el.className = 'element'; 
+    el.id = id;
+    
+    const posX = (x !== null) ? x : 50;
+    const posY = (y !== null) ? y : 50;
+    
+    el.style.left = posX + 'px'; 
+    el.style.top = posY + 'px';
+    el.dataset.type = type; 
+    el.dataset.rot = 0; 
+    el.dataset.sx = 1;
+    
+    if(type === 'img') {
+        el.style.width = "140px";
+        el.innerHTML = `<img src="${content}" style="width:100%; height:100%; border-radius:4px; pointer-events:none; display:block;">`;
+    } else if(type === 'text') {
+        el.style.width = "200px";
+        const textVal = content || "TYPE HERE";
+        // ADDED: The text-drag-handle div below
+        el.innerHTML = `
+            <div class="text-drag-handle">⠿</div>
+            <div contenteditable="true" spellcheck="false" style="font-family:'KG Red Hands'; font-size:24px; color:#000; width:100%; text-align:center; outline:none; padding: 10px; box-sizing: border-box; word-wrap: break-word;">${textVal}</div>
+        `;
+    } else if(type === 'shape') {
+        el.style.width = "100px"; 
+        el.style.height = "100px"; 
+        el.style.backgroundColor = "#000";
+        if(content === 'circle') el.style.borderRadius = "50%";
     }
+    
+    el.innerHTML += `<div class="resizer"></div><div class="rot-handle"></div>`;
+    document.getElementById('objects-layer').appendChild(el);
+    
+    attachElementLogic(el);
+    rebuildLayerList();
+    select(el);
+}
 
     function attachElementLogic(el) {
         let dragging = false, resizing = false, rotating = false;
@@ -774,5 +811,6 @@ function spawn(type, content, x = null, y = null) {
 </script>
 </body>
 </html>
+
 
 
