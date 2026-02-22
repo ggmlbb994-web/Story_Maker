@@ -215,6 +215,22 @@
         }
         .page-dot.active { background: var(--accent); transform: scale(1.3); }
 
+        /* Context Menu Style */
+        #context-menu {
+            position: fixed; z-index: 10000; background: var(--glass);
+            backdrop-filter: var(--ios-blur); -webkit-backdrop-filter: var(--ios-blur);
+            border: 1px solid var(--border); border-radius: 14px; width: 160px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3); display: none; padding: 6px;
+        }
+        .menu-item {
+            padding: 10px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+            border-radius: 8px; display: flex; align-items: center; justify-content: space-between;
+            transition: 0.2s;
+        }
+        .menu-item:hover { background: var(--accent); color: white; }
+        .menu-item.danger { color: #ff453a; }
+        .menu-item.danger:hover { background: #ff453a; color: white; }
+
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
     </style>
@@ -229,6 +245,12 @@
         </div>
         <div style="font-weight: 700; font-size: 13px; letter-spacing: -0.2px; opacity: 0.8;">Preparing PDF...</div>
     </div>
+</div>
+
+<div id="context-menu">
+    <div class="menu-item" onclick="addNewPage()">Add New Page <span>+</span></div>
+    <div class="menu-item" id="ctx-dup">Duplicate <span>❐</span></div>
+    <div class="menu-item danger" id="ctx-del">Delete <span>🗑</span></div>
 </div>
 
 <div id="top-nav" class="adaptive-pill" style="top: 25px; left: 50%; transform: translateX(-50%); width: 520px; height: auto;">
@@ -260,14 +282,6 @@
         </div>
 
         <div id="layer-container" style="display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--border); padding-top:10px; max-height: 120px; overflow-y: auto;"></div>
-        
-        <div style="display:flex; flex-direction:column; gap:8px; margin-top: auto; border-top: 1px solid var(--border); padding-top: 12px;">
-            <button class="btn" style="background:#34C759;" onclick="duplicateCurrentPage()">Duplicate Page</button>
-            <div style="display:flex; gap: 8px;">
-                <button class="btn" style="flex:1;" onclick="addNewPage()">+ New Page</button>
-                <button class="btn" style="background:#ff453a; flex:1;" onclick="deleteCurrentPage()">Delete</button>
-            </div>
-        </div>
     </div>
     <div class="resize-handle"></div>
 </div>
@@ -343,6 +357,129 @@
     function showLoading() { document.getElementById('loading-screen').classList.add('visible'); }
     function hideLoading() { document.getElementById('loading-screen').classList.remove('visible'); }
 
+    // Page Management Fixes
+    function saveCurrentPage() {
+        pages[currentPageIdx] = {
+            html: document.getElementById('objects-layer').innerHTML,
+            bg: document.getElementById('canvas-bg').style.backgroundImage,
+            orientation: document.getElementById('canvas').classList.contains('landscape') ? 'landscape' : 'portrait'
+        };
+    }
+
+    function loadPage(idx) {
+        if (idx < 0 || idx >= pages.length) return;
+        const direction = idx > currentPageIdx ? 'page-swipe-up' : 'page-swipe-down';
+        
+        saveCurrentPage();
+        currentPageIdx = idx;
+        const p = pages[idx];
+        
+        const canvas = document.getElementById('canvas');
+        canvas.classList.remove('page-swipe-up', 'page-swipe-down', 'page-resize-pop');
+        void canvas.offsetWidth;
+        canvas.classList.add(direction);
+        
+        setOrientation(p.orientation, true);
+        document.getElementById('canvas-bg').style.backgroundImage = p.bg;
+        
+        const layer = document.getElementById('objects-layer');
+        layer.innerHTML = p.html;
+        layer.querySelectorAll('.element').forEach(el => attachElementLogic(el));
+        
+        rebuildDots();
+        rebuildLayerList();
+        rebuildThumbnails(); 
+        select(null);
+    }
+
+    function addNewPage() {
+        saveCurrentPage();
+        pages.push({ html: "", bg: "", orientation: "portrait" });
+        loadPage(pages.length - 1);
+        hideContextMenu();
+    }
+
+    function duplicatePageAt(idx) {
+        saveCurrentPage();
+        const clone = JSON.parse(JSON.stringify(pages[idx]));
+        pages.splice(idx + 1, 0, clone);
+        loadPage(idx + 1);
+        hideContextMenu();
+    }
+
+    function deletePageAt(idx) {
+        if(pages.length <= 1) return;
+        pages.splice(idx, 1);
+        // Determine which page to show after deletion
+        let nextIdx = idx;
+        if (nextIdx >= pages.length) nextIdx = pages.length - 1;
+        
+        currentPageIdx = nextIdx;
+        const p = pages[currentPageIdx];
+        
+        // Direct UI update instead of loadPage to avoid saving the "deleted" state back
+        setOrientation(p.orientation, true);
+        document.getElementById('canvas-bg').style.backgroundImage = p.bg;
+        const layer = document.getElementById('objects-layer');
+        layer.innerHTML = p.html;
+        layer.querySelectorAll('.element').forEach(el => attachElementLogic(el));
+        
+        rebuildDots();
+        rebuildLayerList();
+        rebuildThumbnails();
+        hideContextMenu();
+    }
+
+    // Context Menu Logic
+    window.addEventListener('contextmenu', e => {
+        const thumb = e.target.closest('.thumb-item');
+        if (thumb) {
+            e.preventDefault();
+            const idx = parseInt(thumb.dataset.idx);
+            const menu = document.getElementById('context-menu');
+            menu.style.display = 'block';
+            menu.style.left = e.clientX + 'px';
+            menu.style.top = e.clientY + 'px';
+            
+            document.getElementById('ctx-dup').onclick = () => duplicatePageAt(idx);
+            document.getElementById('ctx-del').onclick = () => deletePageAt(idx);
+        } else {
+            hideContextMenu();
+        }
+    });
+
+    window.addEventListener('click', hideContextMenu);
+    function hideContextMenu() { document.getElementById('context-menu').style.display = 'none'; }
+
+    function rebuildThumbnails() {
+        const container = document.getElementById('thumbnail-container');
+        container.innerHTML = "";
+        pages.forEach((p, i) => {
+            const div = document.createElement('div');
+            div.className = `thumb-item ${p.orientation} ${i === currentPageIdx ? 'active' : ''}`;
+            div.dataset.idx = i;
+            div.onclick = () => loadPage(i);
+            
+            // Scaled preview wrap
+            const wrap = document.createElement('div');
+            wrap.className = "thumb-preview-wrap";
+            const scale = p.orientation === 'landscape' ? 140/842 : 100/595;
+            wrap.style.transform = `scale(${scale})`;
+            
+            const bg = document.createElement('div');
+            bg.style.cssText = `position:absolute; inset:0; background-image:${p.bg}; background-size:cover;`;
+            
+            const content = document.createElement('div');
+            content.innerHTML = p.html;
+            
+            wrap.appendChild(bg);
+            wrap.appendChild(content);
+            div.appendChild(wrap);
+            container.appendChild(div);
+        });
+    }
+
+    // Rest of your functions (Export, UI Init, Spawn, etc.)
     async function exportPDF() {
         const { jsPDF } = window.jspdf;
         saveCurrentPage(); 
@@ -386,59 +523,6 @@
         loadPage(currentPageIdx); 
     }
 
-    function saveCurrentPage() {
-        pages[currentPageIdx] = {
-            html: document.getElementById('objects-layer').innerHTML,
-            bg: document.getElementById('canvas-bg').style.backgroundImage,
-            orientation: document.getElementById('canvas').classList.contains('landscape') ? 'landscape' : 'portrait'
-        };
-    }
-
-    function loadPage(idx) {
-        const direction = idx > currentPageIdx ? 'page-swipe-up' : 'page-swipe-down';
-        saveCurrentPage();
-        currentPageIdx = idx;
-        const p = pages[idx];
-        
-        const canvas = document.getElementById('canvas');
-        canvas.classList.remove('page-swipe-up', 'page-swipe-down', 'page-resize-pop');
-        void canvas.offsetWidth;
-        canvas.classList.add(direction);
-        
-        setOrientation(p.orientation, true);
-        document.getElementById('canvas-bg').style.backgroundImage = p.bg;
-        
-        const layer = document.getElementById('objects-layer');
-        layer.innerHTML = p.html;
-        layer.querySelectorAll('.element').forEach(el => attachElementLogic(el));
-        
-        rebuildDots();
-        rebuildLayerList();
-        rebuildThumbnails(); 
-        select(null);
-    }
-
-    function addNewPage() {
-        saveCurrentPage();
-        pages.push({ html: "", bg: "", orientation: "portrait" });
-        loadPage(pages.length - 1);
-    }
-
-    function duplicateCurrentPage() {
-        saveCurrentPage();
-        const current = pages[currentPageIdx];
-        pages.splice(currentPageIdx + 1, 0, JSON.parse(JSON.stringify(current)));
-        loadPage(currentPageIdx + 1);
-    }
-
-    function deleteCurrentPage() {
-        if(pages.length <= 1) return;
-        pages.splice(currentPageIdx, 1);
-        const next = Math.max(0, currentPageIdx - 1);
-        currentPageIdx = next;
-        loadPage(next);
-    }
-
     function setOrientation(type, skipAnim = false) {
         const canvas = document.getElementById('canvas');
         if (!skipAnim && ( (type === 'landscape' && !canvas.classList.contains('landscape')) || (type === 'portrait' && !canvas.classList.contains('portrait')) )) {
@@ -457,11 +541,34 @@
         }
     }
 
+    function rebuildDots() {
+        const container = document.getElementById('dot-container');
+        container.innerHTML = "";
+        pages.forEach((_, i) => {
+            const dot = document.createElement('div');
+            dot.className = `page-dot ${i === currentPageIdx ? 'active' : ''}`;
+            dot.onclick = () => loadPage(i);
+            container.appendChild(dot);
+        });
+    }
+
+    function rebuildLayerList() {
+        const container = document.getElementById('layer-container');
+        container.innerHTML = "";
+        const objects = document.getElementById('objects-layer').children;
+        Array.from(objects).reverse().forEach(obj => {
+            const item = document.createElement('div');
+            item.style.cssText = "padding:8px; background:rgba(120,120,128,0.1); border-radius:10px; font-size:10px; cursor:pointer;";
+            item.textContent = obj.dataset.type.toUpperCase() + " LAYER";
+            item.onclick = (e) => { e.stopPropagation(); select(obj); };
+            container.appendChild(item);
+        });
+    }
+
     function initAdaptiveUI() {
         document.querySelectorAll('.adaptive-pill').forEach(pill => {
             let isDragging = false, isResizing = false;
             let startX, startY, startW, startH, offsetX, offsetY;
-
             pill.addEventListener('mousedown', (e) => {
                 const handle = e.target.closest('.resize-handle');
                 const drag = e.target.closest('.drag-handle');
@@ -475,7 +582,6 @@
                     e.preventDefault();
                 }
             });
-
             window.addEventListener('mousemove', (e) => {
                 if (isDragging) {
                     pill.style.left = (e.clientX - offsetX) + 'px';
@@ -489,14 +595,83 @@
                     pill.style.height = Math.max(50, h) + 'px';
                 }
             });
-
-            window.addEventListener('mouseup', () => { 
-                isDragging = false; isResizing = false; 
-                pill.style.transition = "width 0.3s var(--curve), height 0.3s var(--curve), opacity 0.4s var(--curve), transform 0.5s var(--curve), background-color 0.6s var(--curve), border-color 0.6s var(--curve)";
-            });
+            window.addEventListener('mouseup', () => { isDragging = false; isResizing = false; pill.style.transition = "all 0.3s var(--curve)"; });
         });
     }
 
+    function spawn(type, content, x=100, y=100) {
+        const id = 'obj_' + Date.now();
+        const el = document.createElement('div');
+        el.className = 'element'; el.id = id;
+        el.style.left = x + 'px'; el.style.top = y + 'px';
+        el.dataset.type = type; el.dataset.rot = 0; el.dataset.sx = 1;
+        if(type === 'img') {
+            el.style.width = "140px";
+            el.innerHTML = `<img src="${content}" style="width:100%; height:100%; border-radius:4px; pointer-events:none; display:block;">`;
+        } else if(type === 'text') {
+            el.style.width = "200px";
+            el.innerHTML = `<div contenteditable="true" style="font-family:'KG Red Hands'; font-size:24px; color:#000; width:100%; text-align:center; outline:none; padding: 10px; box-sizing: border-box; word-wrap: break-word;">TYPE HERE</div>`;
+        } else if(type === 'shape') {
+            el.style.width = "100px"; el.style.height = "100px"; el.style.backgroundColor = "#000";
+            if(content === 'circle') el.style.borderRadius = "50%";
+        }
+        el.innerHTML += `<div class="resizer"></div><div class="rot-handle"></div>`;
+        document.getElementById('objects-layer').appendChild(el);
+        attachElementLogic(el);
+        rebuildLayerList();
+        select(el);
+    }
+
+    function attachElementLogic(el) {
+        let dragging = false, resizing = false, rotating = false;
+        let startX, startY, startW, startH, startFontSize;
+        el.onmousedown = (e) => {
+            select(el); 
+            if(e.target.contentEditable === "true") return; 
+            e.stopPropagation();
+            startX = e.clientX; startY = e.clientY;
+            startW = el.offsetWidth; startH = el.offsetHeight;
+            if(el.dataset.type === 'text') startFontSize = parseFloat(window.getComputedStyle(el.querySelector('div')).fontSize);
+            if(e.target.classList.contains('resizer')) resizing = true;
+            else if(e.target.classList.contains('rot-handle')) rotating = true;
+            else dragging = true;
+            const move = (ev) => {
+                if(dragging) {
+                    el.style.left = (el.offsetLeft + (ev.clientX - startX)) + "px";
+                    el.style.top = (el.offsetTop + (ev.clientY - startY)) + "px";
+                    startX = ev.clientX; startY = ev.clientY;
+                }
+                if(resizing) {
+                    const newW = startW + (ev.clientX - startX);
+                    el.style.width = Math.max(20, newW) + "px";
+                    if(el.dataset.type === 'text') el.querySelector('div').style.fontSize = (startFontSize * (newW / startW)) + "px";
+                    else el.style.height = Math.max(20, startH + (ev.clientY - startY)) + "px";
+                }
+                if(rotating) {
+                    const rect = el.getBoundingClientRect();
+                    const angle = Math.atan2(ev.clientY - (rect.top + rect.height/2), ev.clientX - (rect.left + rect.width/2));
+                    el.dataset.rot = (angle * 180 / Math.PI) + 90;
+                    el.style.transform = `rotate(${el.dataset.rot}deg) scaleX(${el.dataset.sx})`;
+                }
+            };
+            const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+            window.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', up);
+        };
+    }
+
+    function select(el) {
+        if(selectedEl) selectedEl.classList.remove('selected');
+        selectedEl = el;
+        const ribbon = document.getElementById('edit-ribbon');
+        if(!el) { ribbon.style.opacity = 0; ribbon.style.transform = "translateX(-50%) translateY(250px)"; return; }
+        el.classList.add('selected');
+        ribbon.style.opacity = 1; ribbon.style.transform = "translateX(-50%) translateY(0)";
+        document.getElementById('shape-color-ctrl').style.display = (el.dataset.type === 'shape') ? 'block' : 'none';
+        document.getElementById('text-font-ctrl').style.display = (el.dataset.type === 'text') ? 'flex' : 'none';
+    }
+
+    function deleteObj() { if(selectedEl) { selectedEl.remove(); select(null); rebuildLayerList(); } }
     function handleUpload(input) {
         Array.from(input.files).forEach(file => {
             const r = new FileReader();
@@ -510,176 +685,18 @@
             r.readAsDataURL(file);
         });
     }
-
-    function applyBG(src) {
-        document.getElementById('canvas-bg').style.backgroundImage = `url(${src})`;
-        saveCurrentPage();
-        rebuildThumbnails();
-    }
-
-    function handleDrop(e) {
-        e.preventDefault();
-        const src = e.dataTransfer.getData("imgSrc");
-        if(!src) return;
-        const rect = document.getElementById('canvas').getBoundingClientRect();
-        spawn('img', src, e.clientX - rect.left - 70, e.clientY - rect.top - 70);
-    }
-
-    function spawn(type, content, x=100, y=100) {
-        const id = 'obj_' + Date.now();
-        const el = document.createElement('div');
-        el.className = 'element'; el.id = id;
-        el.style.left = x + 'px'; el.style.top = y + 'px';
-        el.dataset.type = type; el.dataset.rot = 0; el.dataset.sx = 1;
-
-        if(type === 'img') {
-            el.style.width = "140px";
-            el.innerHTML = `<img src="${content}" style="width:100%; height:100%; border-radius:4px; pointer-events:none; display:block;">`;
-        }
-        else if(type === 'text') {
-            el.style.width = "200px";
-            el.innerHTML = `<div contenteditable="true" style="font-family:'KG Red Hands'; font-size:24px; color:#000; width:100%; text-align:center; outline:none; padding: 10px; box-sizing: border-box; word-wrap: break-word;">TYPE HERE</div>`;
-        }
-        else if(type === 'shape') {
-            el.style.width = "100px"; el.style.height = "100px"; el.style.backgroundColor = "#000";
-            if(content === 'circle') el.style.borderRadius = "50%";
-        }
-
-        el.innerHTML += `<div class="resizer"></div><div class="rot-handle"></div>`;
-        document.getElementById('objects-layer').appendChild(el);
-        attachElementLogic(el);
-        rebuildLayerList();
-        select(el);
-    }
-
-    function attachElementLogic(el) {
-        let dragging = false, resizing = false, rotating = false;
-        let startX, startY, startW, startH, startFontSize;
-
-        el.onmousedown = (e) => {
-            select(el); 
-            if(e.target.contentEditable === "true") return; 
-            e.stopPropagation();
-
-            startX = e.clientX; startY = e.clientY;
-            startW = el.offsetWidth; startH = el.offsetHeight;
-            
-            if(el.dataset.type === 'text') startFontSize = parseFloat(window.getComputedStyle(el.querySelector('div')).fontSize);
-
-            if(e.target.classList.contains('resizer')) resizing = true;
-            else if(e.target.classList.contains('rot-handle')) rotating = true;
-            else dragging = true;
-            
-            const move = (ev) => {
-                if(dragging) {
-                    el.style.left = (el.offsetLeft + (ev.clientX - startX)) + "px";
-                    el.style.top = (el.offsetTop + (ev.clientY - startY)) + "px";
-                    startX = ev.clientX; startY = ev.clientY;
-                }
-                if(resizing) {
-                    const newW = startW + (ev.clientX - startX);
-                    el.style.width = Math.max(20, newW) + "px";
-                    if(el.dataset.type === 'text') {
-                        el.querySelector('div').style.fontSize = (startFontSize * (newW / startW)) + "px";
-                    } else {
-                        el.style.height = Math.max(20, startH + (ev.clientY - startY)) + "px";
-                    }
-                }
-                if(rotating) {
-                    const rect = el.getBoundingClientRect();
-                    const angle = Math.atan2(ev.clientY - (rect.top + rect.height/2), ev.clientX - (rect.left + rect.width/2));
-                    el.dataset.rot = (angle * 180 / Math.PI) + 90;
-                    updateTransform(el);
-                }
-            };
-            const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-            window.addEventListener('mousemove', move);
-            window.addEventListener('mouseup', up);
-        };
-    }
-
-    function updateTransform(el) {
-        el.style.transform = `rotate(${el.dataset.rot}deg) scaleX(${el.dataset.sx})`;
-    }
-
-    function select(el) {
-        if(selectedEl) selectedEl.classList.remove('selected');
-        if(window.getSelection) window.getSelection().removeAllRanges();
-        
-        selectedEl = el;
-        const ribbon = document.getElementById('edit-ribbon');
-        if(!el) { 
-            ribbon.style.opacity = 0; 
-            ribbon.style.transform = "translateX(-50%) translateY(250px)"; 
-            return; 
-        }
-        el.classList.add('selected');
-        ribbon.style.opacity = 1; ribbon.style.transform = "translateX(-50%) translateY(0)";
-        document.getElementById('shape-color-ctrl').style.display = (el.dataset.type === 'shape') ? 'block' : 'none';
-        document.getElementById('text-font-ctrl').style.display = (el.dataset.type === 'text') ? 'flex' : 'none';
-    }
-
-    function deleteObj() { if(selectedEl) { selectedEl.remove(); select(null); rebuildLayerList(); } }
+    function applyBG(src) { document.getElementById('canvas-bg').style.backgroundImage = `url(${src})`; saveCurrentPage(); rebuildThumbnails(); }
+    function handleDrop(e) { e.preventDefault(); const src = e.dataTransfer.getData("imgSrc"); if(src) spawn('img', src, e.clientX - 100, e.clientY - 100); }
     function updateOpacity(v) { if(selectedEl) selectedEl.style.opacity = v; }
     function updateTextColor(c) { if(selectedEl && selectedEl.dataset.type === 'text') selectedEl.querySelector('div').style.color = c; }
     function updateFontFamily(f) { if(selectedEl && selectedEl.dataset.type === 'text') selectedEl.querySelector('div').style.fontFamily = f; }
     function updateShapeColor(c) { if(selectedEl && selectedEl.dataset.type === 'shape') selectedEl.style.backgroundColor = c; }
-    function transformFlip() { if(selectedEl) { selectedEl.dataset.sx *= -1; updateTransform(selectedEl); } }
-    function changeZIndex(dir) { if(selectedEl) { let current = parseInt(window.getComputedStyle(selectedEl).zIndex) || 1; selectedEl.style.zIndex = dir === 'up' ? current + 1 : Math.max(1, current - 1); } }
-
-    function rebuildLayerList() {
-        const container = document.getElementById('layer-container');
-        container.innerHTML = '';
-        document.querySelectorAll('.element').forEach(el => {
-            const item = document.createElement('div');
-            item.style.cssText = "font-size:10px; font-weight:800; padding:10px; background:rgba(120,120,128,0.1); border-radius:12px; cursor:pointer;";
-            item.innerText = el.dataset.type.toUpperCase();
-            item.onclick = (e) => { e.stopPropagation(); select(el); };
-            container.prepend(item);
-        });
-    }
-
-    function rebuildDots() {
-        const container = document.getElementById('dot-container');
-        container.innerHTML = '';
-        pages.forEach((_, i) => {
-            const dot = document.createElement('div');
-            dot.className = `page-dot ${i === currentPageIdx ? 'active' : ''}`;
-            dot.onclick = () => loadPage(i);
-            container.appendChild(dot);
-        });
-    }
-
-    function rebuildThumbnails() {
-        const container = document.getElementById('thumbnail-container');
-        container.innerHTML = '';
-        pages.forEach((p, i) => {
-            const thumb = document.createElement('div');
-            thumb.className = `thumb-item ${p.orientation} ${i === currentPageIdx ? 'active' : ''}`;
-            
-            const previewWrap = document.createElement('div');
-            previewWrap.className = 'thumb-preview-wrap';
-            const scale = p.orientation === 'portrait' ? 100/595 : 140/842;
-            previewWrap.style.transform = `scale(${scale})`;
-            
-            const bgDiv = document.createElement('div');
-            bgDiv.style.cssText = `position:absolute; inset:0; background-image:${p.bg}; background-size:cover;`;
-            
-            const contentDiv = document.createElement('div');
-            contentDiv.innerHTML = p.html;
-
-            previewWrap.appendChild(bgDiv);
-            previewWrap.appendChild(contentDiv);
-            thumb.appendChild(previewWrap);
-            thumb.onclick = () => loadPage(i);
-            container.appendChild(thumb);
-        });
-    }
+    function transformFlip() { if(selectedEl) { selectedEl.dataset.sx *= -1; selectedEl.style.transform = `rotate(${selectedEl.dataset.rot}deg) scaleX(${selectedEl.dataset.sx})`; } }
+    function changeZIndex(dir) { if(selectedEl) { const current = parseInt(window.getComputedStyle(selectedEl).zIndex) || 1; selectedEl.style.zIndex = dir === 'up' ? current + 1 : current - 1; rebuildLayerList(); } }
 
     initAdaptiveUI();
     rebuildDots();
     rebuildThumbnails();
 </script>
-
 </body>
 </html>
